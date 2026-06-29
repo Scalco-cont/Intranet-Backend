@@ -14,11 +14,17 @@ services:
     volumes:
       - sqlite_data:/app/instance
     networks:
+      - coolify
       - backend-net
     ports:
       - "5000:5000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.backend.loadbalancer.server.port=5000"
 
 networks:
+  coolify:
+    external: true
   backend-net:
     driver: bridge
 
