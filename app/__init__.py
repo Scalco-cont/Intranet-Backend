@@ -44,7 +44,6 @@ def create_app(config_class=Config):
     migrate.init_app(app, db)
     jwt.init_app(app)
     cors.init_app(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
-
     Swagger(app, config=SWAGGER_CONFIG, merge=True)
 
     app.register_blueprint(auth_bp)
@@ -52,7 +51,15 @@ def create_app(config_class=Config):
     app.register_blueprint(links_bp)
     app.register_blueprint(comunicados_bp)
 
-
+    # Handler explícito para preflight OPTIONS
+    @app.before_request
+    def handle_options():
+        if request.method == "OPTIONS":
+            response = app.make_default_options_response()
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+            return response
 
     with app.app_context():
         from app.models import Administrador, Sistema, LinkUtil, Log  # noqa
