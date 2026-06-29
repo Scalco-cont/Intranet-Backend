@@ -43,7 +43,8 @@ def create_app(config_class=Config):
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
-    cors.init_app(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+    cors.init_app(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
     Swagger(app, config=SWAGGER_CONFIG, merge=True)
 
     app.register_blueprint(auth_bp)
