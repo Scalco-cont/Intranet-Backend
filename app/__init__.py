@@ -51,14 +51,18 @@ def create_app(config_class=Config):
     app.register_blueprint(links_bp)
     app.register_blueprint(comunicados_bp)
 
-    # Handler explícito para preflight OPTIONS
+    @app.after_request
+    def add_cors_headers(response):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        return response
+
     @app.before_request
     def handle_options():
         if request.method == "OPTIONS":
-            response = app.make_default_options_response()
-            response.headers["Access-Control-Allow-Origin"] = "*"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+            response = jsonify({})
+            response.status_code = 200
             return response
 
     with app.app_context():
