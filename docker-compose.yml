@@ -21,6 +21,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.backend.loadbalancer.server.port=5000"
+      - "traefik.docker.network=coolify"
 
 networks:
   coolify:
