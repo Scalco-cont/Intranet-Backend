@@ -37,6 +37,8 @@ class LinkUtil(db.Model):
     icone = db.Column(db.String(50), nullable=False, default='Link')
     ativo = db.Column(db.Boolean, default=True)
     ordem_exibicao = db.Column(db.Integer, default=0)
+    # Tags armazenadas como string separada por vírgulas, ex: "fiscal,contabilidade"
+    tags = db.Column(db.String(500), nullable=True, default='')
     criado_em = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
@@ -48,5 +50,6 @@ class LinkUtil(db.Model):
             'icone': self.icone,
             'ativo': self.ativo,
             'ordem_exibicao': self.ordem_exibicao,
+            'tags': [t.strip() for t in self.tags.split(',') if t.strip()] if self.tags else [],
             'criado_em': self.criado_em.isoformat(),
         }

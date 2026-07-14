@@ -50,13 +50,18 @@ def criar_link():
     if not data or not data.get('nome') or not data.get('url'):
         return jsonify({'message': 'Nome e URL são obrigatórios.'}), 400
 
+    # Tags recebidas como lista, salvas como string separada por vírgulas
+    tags_raw = data.get('tags', [])
+    tags_str = ','.join([t.strip().lower() for t in tags_raw if t.strip()]) if isinstance(tags_raw, list) else ''
+
     link = LinkUtil(
         nome=data['nome'],
         descricao=data.get('descricao', ''),
         url=data['url'],
         icone=data.get('icone', 'Link'),
         ativo=data.get('ativo', True),
-        ordem_exibicao=data.get('ordem_exibicao', 0)
+        ordem_exibicao=data.get('ordem_exibicao', 0),
+        tags=tags_str,
     )
     db.session.add(link)
     db.session.commit()
@@ -86,6 +91,14 @@ def editar_link(id):
     link.icone = data.get('icone', link.icone)
     link.ativo = data.get('ativo', link.ativo)
     link.ordem_exibicao = data.get('ordem_exibicao', link.ordem_exibicao)
+
+    # Atualiza tags se enviadas (lista -> string separada por vírgulas)
+    if 'tags' in data:
+        tags_raw = data['tags']
+        if isinstance(tags_raw, list):
+            link.tags = ','.join([t.strip().lower() for t in tags_raw if t.strip()])
+        else:
+            link.tags = link.tags  # mantém o valor atual se não for lista
 
     db.session.commit()
     registrar_log(get_jwt_identity(), 'UPDATE', 'link', link.id, f'Editou: {link.nome}')
