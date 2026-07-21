@@ -8,9 +8,12 @@ services:
     restart: always
     environment:
       - FLASK_ENV=production
-      - JWT_SECRET_KEY=61df3d4880dabb76e3fa7db84351935e1dad6000edad1df20c3a064f3cda8e7d
-      - SECRET_KEY=61df3d4880dabb76e3fa7db84359012309jd09jd210783090c3a064f3cda8e7d
+      - DEBUG=False
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - SECRET_KEY=${SECRET_KEY}
       - DATABASE_URL=sqlite:///intranet.db
+      - ADMIN_SEED_PASSWORD=${ADMIN_SEED_PASSWORD}
+      - EDITOR_SEED_PASSWORD=${EDITOR_SEED_PASSWORD}
     volumes:
       - sqlite_data:/app/instance
     networks:
