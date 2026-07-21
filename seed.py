@@ -1,7 +1,13 @@
 """
 Script para popular o banco com dados iniciais.
 Execute: python seed.py
+
+As senhas padrão de Admin e Editor podem ser definidas via variáveis de
+ambiente ADMIN_SEED_PASSWORD e EDITOR_SEED_PASSWORD. Se não definidas, uma
+senha aleatória é gerada e impressa uma única vez — nunca fica hardcoded
+no repositório.
 """
+import secrets
 import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
@@ -17,17 +23,25 @@ with app.app_context():
 
     # Administrador padrao
     if not Administrador.query.filter_by(email='admin@empresa.com').first():
+        admin_password = os.getenv('ADMIN_SEED_PASSWORD')
+        if not admin_password:
+            admin_password = secrets.token_urlsafe(12)
+            print(f'[AVISO] ADMIN_SEED_PASSWORD não definida — senha gerada automaticamente: {admin_password}')
         admin = Administrador(nome='Administrador', email='admin@empresa.com')
-        admin.set_senha('Admin@123')
+        admin.set_senha(admin_password)
         db.session.add(admin)
-        print('[OK] Admin criado: admin@empresa.com / Admin@123')
+        print('[OK] Admin criado: admin@empresa.com')
 
     # Editor padrao
     if not Usuario.query.filter_by(email='editor@empresa.com').first():
+        editor_password = os.getenv('EDITOR_SEED_PASSWORD')
+        if not editor_password:
+            editor_password = secrets.token_urlsafe(12)
+            print(f'[AVISO] EDITOR_SEED_PASSWORD não definida — senha gerada automaticamente: {editor_password}')
         editor = Usuario(nome='Editor RH', email='editor@empresa.com', perfil='EDITOR')
-        editor.set_senha('Editor@123')
+        editor.set_senha(editor_password)
         db.session.add(editor)
-        print('[OK] Editor criado: editor@empresa.com / Editor@123')
+        print('[OK] Editor criado: editor@empresa.com')
 
     db.session.flush()
 
