@@ -3,6 +3,7 @@ from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 from app.extensions import db
 from app.models import Comunicado, Comentario, Reacao
 from app.middleware.auth_middleware import editor_or_admin_required, admin_required, get_current_user_info
+from app.utils.sanitize import sanitize_html
 
 comunicados_bp = Blueprint('comunicados', __name__, url_prefix='/api/comunicados')
 
@@ -61,7 +62,7 @@ def criar_comunicado():
 
     comunicado = Comunicado(
         titulo=data['titulo'],
-        conteudo=data['conteudo'],
+        conteudo=sanitize_html(data['conteudo']),
         categoria=data.get('categoria', 'Geral'),
         prioridade=data.get('prioridade', 'normal'),
         autor_id=autor_id,
@@ -93,7 +94,7 @@ def editar_comunicado(id):
 
     data = request.get_json()
     comunicado.titulo = data.get('titulo', comunicado.titulo)
-    comunicado.conteudo = data.get('conteudo', comunicado.conteudo)
+    comunicado.conteudo = sanitize_html(data.get('conteudo', comunicado.conteudo))
     comunicado.categoria = data.get('categoria', comunicado.categoria)
     comunicado.prioridade = data.get('prioridade', comunicado.prioridade)
     db.session.commit()
