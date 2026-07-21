@@ -4,7 +4,12 @@ import sys
 from app.models import Administrador, Usuario
 
 
-def test_seed_usa_senha_do_env_quando_definida(app, db, monkeypatch):
+def test_seed_usa_senha_do_env_quando_definida(app, db, monkeypatch, request):
+    # Ensure seed module is cleaned up from sys.modules after test to prevent pollution
+    def cleanup_seed_module():
+        sys.modules.pop('seed', None)
+    request.addfinalizer(cleanup_seed_module)
+
     monkeypatch.setenv('ADMIN_SEED_PASSWORD', 'MinhaSenhaForte@1')
     monkeypatch.setenv('EDITOR_SEED_PASSWORD', 'OutraSenhaForte@1')
 
