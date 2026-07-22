@@ -1,3 +1,4 @@
+from app.routes import arquivos_routes
 from app.services.drive_service import decodificar_token, mintar_token
 
 
@@ -63,3 +64,123 @@ def test_profundidade_capada_em_20_niveis(app, client, monkeypatch):
     with app.app_context():
         payload_filho = decodificar_token(corpo['itens'][0]['token'])
     assert len(payload_filho['caminho']) == 20
+
+
+class FakeExecutavel:
+    def __init__(self, resultado):
+        self._resultado = resultado
+
+    def execute(self):
+        return self._resultado
+
+
+class FakeFilesResourceConteudo:
+    def __init__(self, metadados):
+        self._metadados = metadados
+
+    def get(self, fileId, fields=None, supportsAllDrives=None):
+        return FakeExecutavel(self._metadados)
+
+    def get_media(self, fileId, supportsAllDrives=None):
+        return object()
+
+
+class FakeDriveClientConteudo:
+    def __init__(self, metadados):
+        self._files = FakeFilesResourceConteudo(metadados)
+
+    def files(self):
+        return self._files
+
+
+class FakeDownloaderOk:
+    def __init__(self, buffer, requisicao, chunksize):
+        self.buffer = buffer
+        self._chamadas = 0
+
+    def next_chunk(self):
+        self._chamadas += 1
+        if self._chamadas == 1:
+            self.buffer.write(b'PARTE-UM-')
+            return (None, False)
+        self.buffer.write(b'PARTE-DOIS')
+        return (None, True)
+
+
+class FakeDownloaderComFalha:
+    def __init__(self, buffer, requisicao, chunksize):
+        self.buffer = buffer
+        self._chamadas = 0
+
+    def next_chunk(self):
+        self._chamadas += 1
+        if self._chamadas == 1:
+            self.buffer.write(b'PARTE-UM-')
+            return (None, False)
+        raise RuntimeError('falha simulada no meio do download')
+
+
+def test_arquivo_pdf_streaming_ok(app, client, monkeypatch):
+    with app.app_context():
+        token = mintar_token('pdf-real-1', 'pdf', 'Aula 1.pdf')
+
+    metadados = {'id': 'pdf-real-1', 'name': 'Aula 1.pdf', 'mimeType': 'application/pdf', 'size': '19'}
+    monkeypatch.setattr(arquivos_routes, 'obter_client', lambda: FakeDriveClientConteudo(metadados))
+    monkeypatch.setattr(arquivos_routes, 'MediaIoBaseDownload', FakeDownloaderOk)
+
+    resp = client.get(f'/api/arquivos-do-curso/arquivo/{token}')
+    assert resp.status_code == 200
+    assert resp.headers['Content-Type'] == 'application/pdf'
+    assert resp.headers['Content-Disposition'] == 'inline'
+    assert resp.headers['Cache-Control'] == 'no-store'
+    assert resp.headers['Content-Length'] == '19'
+    assert resp.get_data() == b'PARTE-UM-PARTE-DOIS'
+
+
+def test_arquivo_sem_size_omite_content_length(app, client, monkeypatch):
+    with app.app_context():
+        token = mintar_token('pdf-real-2', 'pdf', 'Aula 2.pdf')
+
+    metadados = {'id': 'pdf-real-2', 'name': 'Aula 2.pdf', 'mimeType': 'application/pdf'}  # sem 'size'
+    monkeypatch.setattr(arquivos_routes, 'obter_client', lambda: FakeDriveClientConteudo(metadados))
+    monkeypatch.setattr(arquivos_routes, 'MediaIoBaseDownload', FakeDownloaderOk)
+
+    resp = client.get(f'/api/arquivos-do-curso/arquivo/{token}')
+    assert resp.status_code == 200
+    assert 'Content-Length' not in resp.headers
+
+
+def test_arquivo_mimetype_mudou_na_origem_e_rejeitado(app, client, monkeypatch):
+    with app.app_context():
+        token = mintar_token('pdf-real-3', 'pdf', 'Aula 3.pdf')
+
+    metadados = {'id': 'pdf-real-3', 'name': 'Aula 3.pdf', 'mimeType': 'image/png', 'size': '10'}
+    monkeypatch.setattr(arquivos_routes, 'obter_client', lambda: FakeDriveClientConteudo(metadados))
+
+    resp = client.get(f'/api/arquivos-do-curso/arquivo/{token}')
+    assert resp.status_code == 400
+    assert resp.get_json()['error'] == 'solicitacao_invalida'
+
+
+def test_arquivo_token_de_pasta_e_rejeitado(app, client):
+    with app.app_context():
+        token_pasta = mintar_token('pasta-real-1', 'pasta', 'Módulo 1', caminho=[])
+    resp = client.get(f'/api/arquivos-do-curso/arquivo/{token_pasta}')
+    assert resp.status_code == 400
+
+
+def test_arquivo_falha_no_meio_do_stream_e_logada(app, client, monkeypatch, caplog):
+    with app.app_context():
+        token = mintar_token('pdf-real-4', 'pdf', 'Aula 4.pdf')
+
+    metadados = {'id': 'pdf-real-4', 'name': 'Aula 4.pdf', 'mimeType': 'application/pdf', 'size': '19'}
+    monkeypatch.setattr(arquivos_routes, 'obter_client', lambda: FakeDriveClientConteudo(metadados))
+    monkeypatch.setattr(arquivos_routes, 'MediaIoBaseDownload', FakeDownloaderComFalha)
+
+    with caplog.at_level('ERROR'):
+        resp = client.get(f'/api/arquivos-do-curso/arquivo/{token}')
+        dados = resp.get_data()  # força o consumo do generator
+
+    assert resp.status_code == 200  # headers já foram enviados
+    assert dados == b'PARTE-UM-'  # truncado
+    assert any('Falha no meio do streaming' in r.message for r in caplog.records)

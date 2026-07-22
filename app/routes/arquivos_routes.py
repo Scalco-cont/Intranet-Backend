@@ -3,14 +3,20 @@ Esta área não tem controle de acesso próprio. A proteção depende da intrane
 estar restrita à rede interna. Se ela for exposta à internet, adicionar um
 código de acesso antes disso.
 """
-from flask import Blueprint, current_app, jsonify, request
+import io
+
+from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
+from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseDownload
 
 from app.services.drive_service import (
     ArquivosDoCursoError,
     MAX_PROFUNDIDADE,
     decodificar_token,
     listar_pasta,
+    mapear_erro_http,
     mintar_token,
+    obter_client,
 )
 
 arquivos_bp = Blueprint('arquivos', __name__, url_prefix='/api/arquivos-do-curso')
@@ -79,3 +85,58 @@ def listar():
         })
 
     return jsonify({'caminho': caminho_atual, 'itens': itens}), 200
+
+
+@arquivos_bp.route('/arquivo/<token>', methods=['GET'])
+def arquivo(token):
+    try:
+        payload = decodificar_token(token)
+    except ArquivosDoCursoError as erro:
+        return jsonify({'error': erro.codigo, 'message': erro.mensagem}), erro.status
+
+    if payload['tipo'] != 'pdf':
+        return jsonify({'error': 'solicitacao_invalida', 'message': 'Token não é de um PDF.'}), 400
+
+    id_real = payload['id']
+    nome_arquivo = payload['nome']
+
+    try:
+        metadados = obter_client().files().get(
+            fileId=id_real, fields='id,name,mimeType,size', supportsAllDrives=True,
+        ).execute()
+    except HttpError as exc:
+        erro = mapear_erro_http(exc)
+        return jsonify({'error': erro.codigo, 'message': erro.mensagem}), erro.status
+
+    if metadados.get('mimeType') != 'application/pdf':
+        return jsonify({'error': 'solicitacao_invalida', 'message': 'Arquivo não é mais um PDF na origem.'}), 400
+
+    current_app.logger.info(
+        'Acesso a arquivo do curso: ip=%s arquivo=%s', obter_ip_cliente(), nome_arquivo
+    )
+
+    def gerar():
+        buffer = io.BytesIO()
+        requisicao = obter_client().files().get_media(fileId=id_real, supportsAllDrives=True)
+        downloader = MediaIoBaseDownload(buffer, requisicao, chunksize=1024 * 1024)
+        concluido = False
+        try:
+            while not concluido:
+                _, concluido = downloader.next_chunk()
+                buffer.seek(0)
+                yield buffer.read()
+                buffer.seek(0)
+                buffer.truncate(0)
+        except Exception:
+            current_app.logger.exception('Falha no meio do streaming do arquivo: %s', nome_arquivo)
+
+    headers = {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'inline',
+        'Cache-Control': 'no-store',
+    }
+    tamanho = metadados.get('size')
+    if tamanho is not None:
+        headers['Content-Length'] = str(tamanho)
+
+    return Response(stream_with_context(gerar()), headers=headers)
