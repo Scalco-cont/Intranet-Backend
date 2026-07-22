@@ -7,6 +7,7 @@ import json
 import time
 
 from flask import current_app
+from google.auth.transport.requests import AuthorizedSession
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -16,8 +17,10 @@ SALT = 'arquivos-do-curso'
 MAX_PROFUNDIDADE = 20
 DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 TIPOS_ACEITOS = {'application/vnd.google-apps.folder', 'application/pdf'}
+DRIVE_MEDIA_URL_TEMPLATE = 'https://www.googleapis.com/drive/v3/files/{id}'
 
 _client = None
+_sessao_autorizada = None
 _cache = {}  # {id_real: (timestamp, itens)}
 
 
@@ -75,6 +78,18 @@ def obter_client():
         creds = service_account.Credentials.from_service_account_info(info, scopes=DRIVE_SCOPES)
         _client = build('drive', 'v3', credentials=creds, cache_discovery=False, static_discovery=True)
     return _client
+
+
+def obter_sessao_autorizada():
+    """Sessão HTTP autenticada (não a wrapper alta-nível do googleapiclient) — usada só
+    pra baixar o conteúdo do arquivo direto via REST, porque precisamos repassar o header
+    Range do cliente ao Drive, o que a MediaIoBaseDownload não permite fazer facilmente."""
+    global _sessao_autorizada
+    if _sessao_autorizada is None:
+        info = json.loads(current_app.config['GOOGLE_SERVICE_ACCOUNT_JSON'])
+        creds = service_account.Credentials.from_service_account_info(info, scopes=DRIVE_SCOPES)
+        _sessao_autorizada = AuthorizedSession(creds)
+    return _sessao_autorizada
 
 
 def mapear_erro_http(exc):

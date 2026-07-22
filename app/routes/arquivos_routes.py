@@ -3,20 +3,19 @@ Esta área não tem controle de acesso próprio. A proteção depende da intrane
 estar restrita à rede interna. Se ela for exposta à internet, adicionar um
 código de acesso antes disso.
 """
-import io
-
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseDownload
 
 from app.services.drive_service import (
     ArquivosDoCursoError,
+    DRIVE_MEDIA_URL_TEMPLATE,
     MAX_PROFUNDIDADE,
     decodificar_token,
     listar_pasta,
     mapear_erro_http,
     mintar_token,
     obter_client,
+    obter_sessao_autorizada,
 )
 
 arquivos_bp = Blueprint('arquivos', __name__, url_prefix='/api/arquivos-do-curso')
@@ -57,7 +56,7 @@ def listar():
     else:
         id_real = current_app.config['ARQUIVOS_PASTA_RAIZ']
         ancestrais = []
-        nome_atual = 'Arquivos do curso'
+        nome_atual = 'Biblioteca de Cursos'
         token = None
 
     caminho_atual = ancestrais + [{'token': token, 'nome': nome_atual}]
@@ -111,22 +110,33 @@ def arquivo(token):
     if metadados.get('mimeType') != 'application/pdf':
         return jsonify({'error': 'solicitacao_invalida', 'message': 'Arquivo não é mais um PDF na origem.'}), 400
 
+    # Decisão consciente: não repassamos o Range do cliente pro Drive. Nesta rede, cada
+    # requisição ao Drive carrega uma latência fixa (~1,5-2s) independente do tamanho
+    # pedido — e o pdf.js chega a abrir 10+ requisições Range concorrentes por PDF. Com
+    # gunicorn rodando poucos workers/threads em produção, isso é capaz de saturar o
+    # backend inteiro por uma única pessoa abrindo um PDF. Sempre servimos o arquivo
+    # inteiro numa única chamada.
+    resposta_drive = obter_sessao_autorizada().get(
+        DRIVE_MEDIA_URL_TEMPLATE.format(id=id_real),
+        params={'alt': 'media', 'supportsAllDrives': 'true'},
+        stream=True,
+    )
+
+    if resposta_drive.status_code != 200:
+        current_app.logger.exception(
+            'Drive respondeu %s ao baixar o arquivo: %s', resposta_drive.status_code, nome_arquivo
+        )
+        return jsonify({'error': 'indisponivel', 'message': 'Google Drive indisponível no momento.'}), 502
+
     current_app.logger.info(
         'Acesso a arquivo do curso: ip=%s arquivo=%s', obter_ip_cliente(), nome_arquivo
     )
 
     def gerar():
-        buffer = io.BytesIO()
-        requisicao = obter_client().files().get_media(fileId=id_real, supportsAllDrives=True)
-        downloader = MediaIoBaseDownload(buffer, requisicao, chunksize=1024 * 1024)
-        concluido = False
         try:
-            while not concluido:
-                _, concluido = downloader.next_chunk()
-                buffer.seek(0)
-                yield buffer.read()
-                buffer.seek(0)
-                buffer.truncate(0)
+            for pedaco in resposta_drive.iter_content(chunk_size=1024 * 1024):
+                if pedaco:
+                    yield pedaco
         except Exception:
             current_app.logger.exception('Falha no meio do streaming do arquivo: %s', nome_arquivo)
 
@@ -135,8 +145,14 @@ def arquivo(token):
         'Content-Disposition': 'inline',
         'Cache-Control': 'no-store',
     }
+    # O tamanho vem do metadado (files().get), não do header da resposta de mídia — em
+    # download de arquivo inteiro (sem Range), o Drive costuma responder em
+    # Transfer-Encoding: chunked sem Content-Length algum, o que quebraria a barra de
+    # progresso do frontend sem essa alternativa.
     tamanho = metadados.get('size')
     if tamanho is not None:
         headers['Content-Length'] = str(tamanho)
+    elif 'Content-Length' in resposta_drive.headers:
+        headers['Content-Length'] = resposta_drive.headers['Content-Length']
 
     return Response(stream_with_context(gerar()), headers=headers)

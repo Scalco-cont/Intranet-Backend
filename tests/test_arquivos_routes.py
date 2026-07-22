@@ -10,14 +10,14 @@ def test_listar_raiz_sem_parametro(client, monkeypatch):
     resp = client.get('/api/arquivos-do-curso/listar')
     corpo = resp.get_json()
     assert resp.status_code == 200
-    assert corpo['caminho'] == [{'token': None, 'nome': 'Arquivos do curso'}]
+    assert corpo['caminho'] == [{'token': None, 'nome': 'Biblioteca de Cursos'}]
     assert [i['nome'] for i in corpo['itens']] == ['Módulo 1', 'Aula 1.pdf']
     assert [i['tipo'] for i in corpo['itens']] == ['pasta', 'pdf']
 
 
 def test_listar_com_token_de_pasta_valido(app, client, monkeypatch):
     with app.app_context():
-        token_pasta = mintar_token('pasta-real-1', 'pasta', 'Módulo 1', caminho=[{'token': None, 'nome': 'Arquivos do curso'}])
+        token_pasta = mintar_token('pasta-real-1', 'pasta', 'Módulo 1', caminho=[{'token': None, 'nome': 'Biblioteca de Cursos'}])
 
     monkeypatch.setattr('app.routes.arquivos_routes.listar_pasta', lambda id_real: [
         {'id': 'f3', 'name': 'Semana 1', 'mimeType': 'application/vnd.google-apps.folder', 'modifiedTime': '2026-01-01T00:00:00Z'},
@@ -26,7 +26,7 @@ def test_listar_com_token_de_pasta_valido(app, client, monkeypatch):
     corpo = resp.get_json()
     assert resp.status_code == 200
     assert corpo['caminho'] == [
-        {'token': None, 'nome': 'Arquivos do curso'},
+        {'token': None, 'nome': 'Biblioteca de Cursos'},
         {'token': token_pasta, 'nome': 'Módulo 1'},
     ]
 
@@ -81,9 +81,6 @@ class FakeFilesResourceConteudo:
     def get(self, fileId, fields=None, supportsAllDrives=None):
         return FakeExecutavel(self._metadados)
 
-    def get_media(self, fileId, supportsAllDrives=None):
-        return object()
-
 
 class FakeDriveClientConteudo:
     def __init__(self, metadados):
@@ -93,31 +90,30 @@ class FakeDriveClientConteudo:
         return self._files
 
 
-class FakeDownloaderOk:
-    def __init__(self, buffer, requisicao, chunksize):
-        self.buffer = buffer
-        self._chamadas = 0
+class FakeRespostaDrive:
+    def __init__(self, status_code, headers, pedacos):
+        self.status_code = status_code
+        self.headers = headers
+        self._pedacos = pedacos
 
-    def next_chunk(self):
-        self._chamadas += 1
-        if self._chamadas == 1:
-            self.buffer.write(b'PARTE-UM-')
-            return (None, False)
-        self.buffer.write(b'PARTE-DOIS')
-        return (None, True)
+    def iter_content(self, chunk_size=None):
+        yield from self._pedacos
 
 
-class FakeDownloaderComFalha:
-    def __init__(self, buffer, requisicao, chunksize):
-        self.buffer = buffer
-        self._chamadas = 0
-
-    def next_chunk(self):
-        self._chamadas += 1
-        if self._chamadas == 1:
-            self.buffer.write(b'PARTE-UM-')
-            return (None, False)
+class FakeRespostaDriveComFalha(FakeRespostaDrive):
+    def iter_content(self, chunk_size=None):
+        yield b'PARTE-UM-'
         raise RuntimeError('falha simulada no meio do download')
+
+
+class FakeSessaoAutorizada:
+    def __init__(self, resposta):
+        self._resposta = resposta
+        self.ultima_chamada_headers = None
+
+    def get(self, url, params=None, headers=None, stream=None):
+        self.ultima_chamada_headers = headers
+        return self._resposta
 
 
 def test_arquivo_pdf_streaming_ok(app, client, monkeypatch):
@@ -126,24 +122,63 @@ def test_arquivo_pdf_streaming_ok(app, client, monkeypatch):
 
     metadados = {'id': 'pdf-real-1', 'name': 'Aula 1.pdf', 'mimeType': 'application/pdf', 'size': '19'}
     monkeypatch.setattr(arquivos_routes, 'obter_client', lambda: FakeDriveClientConteudo(metadados))
-    monkeypatch.setattr(arquivos_routes, 'MediaIoBaseDownload', FakeDownloaderOk)
+    resposta_fake = FakeRespostaDrive(200, {'Content-Length': '19'}, [b'PARTE-UM-', b'PARTE-DOIS'])
+    monkeypatch.setattr(arquivos_routes, 'obter_sessao_autorizada', lambda: FakeSessaoAutorizada(resposta_fake))
 
     resp = client.get(f'/api/arquivos-do-curso/arquivo/{token}')
     assert resp.status_code == 200
     assert resp.headers['Content-Type'] == 'application/pdf'
     assert resp.headers['Content-Disposition'] == 'inline'
     assert resp.headers['Cache-Control'] == 'no-store'
+    assert 'Accept-Ranges' not in resp.headers
     assert resp.headers['Content-Length'] == '19'
     assert resp.get_data() == b'PARTE-UM-PARTE-DOIS'
 
 
-def test_arquivo_sem_size_omite_content_length(app, client, monkeypatch):
+def test_arquivo_ignora_range_do_cliente_e_devolve_arquivo_inteiro(app, client, monkeypatch):
+    # Decisão consciente: não repassamos Range pro Drive (ver design doc, trade-off T2
+    # revisado). Mesmo que o navegador peça um pedaço, sempre servimos o arquivo inteiro
+    # com 200 — evita multiplicar chamadas concorrentes à API do Drive por abertura de PDF.
+    with app.app_context():
+        token = mintar_token('pdf-real-5', 'pdf', 'Aula 5.pdf')
+
+    metadados = {'id': 'pdf-real-5', 'name': 'Aula 5.pdf', 'mimeType': 'application/pdf'}
+    monkeypatch.setattr(arquivos_routes, 'obter_client', lambda: FakeDriveClientConteudo(metadados))
+    resposta_fake = FakeRespostaDrive(200, {'Content-Length': '1000'}, [b'X' * 1000])
+    sessao_fake = FakeSessaoAutorizada(resposta_fake)
+    monkeypatch.setattr(arquivos_routes, 'obter_sessao_autorizada', lambda: sessao_fake)
+
+    resp = client.get(f'/api/arquivos-do-curso/arquivo/{token}', headers={'Range': 'bytes=0-99'})
+    assert resp.status_code == 200
+    assert resp.headers['Content-Length'] == '1000'
+    assert sessao_fake.ultima_chamada_headers is None
+
+
+def test_arquivo_usa_size_do_metadado_mesmo_sem_content_length_na_resposta(app, client, monkeypatch):
+    # O tamanho vem do metadado, não do header da resposta de mídia — em download de
+    # arquivo inteiro o Drive costuma responder em Transfer-Encoding: chunked sem
+    # Content-Length algum, então não dá pra confiar só na resposta de mídia.
     with app.app_context():
         token = mintar_token('pdf-real-2', 'pdf', 'Aula 2.pdf')
 
-    metadados = {'id': 'pdf-real-2', 'name': 'Aula 2.pdf', 'mimeType': 'application/pdf'}  # sem 'size'
+    metadados = {'id': 'pdf-real-2', 'name': 'Aula 2.pdf', 'mimeType': 'application/pdf', 'size': '8'}
     monkeypatch.setattr(arquivos_routes, 'obter_client', lambda: FakeDriveClientConteudo(metadados))
-    monkeypatch.setattr(arquivos_routes, 'MediaIoBaseDownload', FakeDownloaderOk)
+    resposta_fake = FakeRespostaDrive(200, {}, [b'conteudo'])  # sem Content-Length na resposta
+    monkeypatch.setattr(arquivos_routes, 'obter_sessao_autorizada', lambda: FakeSessaoAutorizada(resposta_fake))
+
+    resp = client.get(f'/api/arquivos-do-curso/arquivo/{token}')
+    assert resp.status_code == 200
+    assert resp.headers['Content-Length'] == '8'
+
+
+def test_arquivo_sem_size_e_sem_content_length_omite_o_header(app, client, monkeypatch):
+    with app.app_context():
+        token = mintar_token('pdf-real-6', 'pdf', 'Aula 6.pdf')
+
+    metadados = {'id': 'pdf-real-6', 'name': 'Aula 6.pdf', 'mimeType': 'application/pdf'}  # sem 'size'
+    monkeypatch.setattr(arquivos_routes, 'obter_client', lambda: FakeDriveClientConteudo(metadados))
+    resposta_fake = FakeRespostaDrive(200, {}, [b'conteudo'])  # sem Content-Length na resposta
+    monkeypatch.setattr(arquivos_routes, 'obter_sessao_autorizada', lambda: FakeSessaoAutorizada(resposta_fake))
 
     resp = client.get(f'/api/arquivos-do-curso/arquivo/{token}')
     assert resp.status_code == 200
@@ -175,7 +210,8 @@ def test_arquivo_falha_no_meio_do_stream_e_logada(app, client, monkeypatch, capl
 
     metadados = {'id': 'pdf-real-4', 'name': 'Aula 4.pdf', 'mimeType': 'application/pdf', 'size': '19'}
     monkeypatch.setattr(arquivos_routes, 'obter_client', lambda: FakeDriveClientConteudo(metadados))
-    monkeypatch.setattr(arquivos_routes, 'MediaIoBaseDownload', FakeDownloaderComFalha)
+    resposta_fake = FakeRespostaDriveComFalha(200, {'Content-Length': '19'}, [])
+    monkeypatch.setattr(arquivos_routes, 'obter_sessao_autorizada', lambda: FakeSessaoAutorizada(resposta_fake))
 
     with caplog.at_level('ERROR'):
         resp = client.get(f'/api/arquivos-do-curso/arquivo/{token}')
