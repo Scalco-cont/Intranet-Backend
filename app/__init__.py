@@ -7,6 +7,7 @@ from app.routes.auth_routes import auth_bp
 from app.routes.sistemas_routes import sistemas_bp
 from app.routes.links_routes import links_bp
 from app.routes.comunicados_routes import comunicados_bp
+from app.routes.arquivos_routes import arquivos_bp
 from app.services.drive_service import validar_credencial_google
 
 
@@ -60,6 +61,7 @@ def create_app(config_class=Config):
     app.register_blueprint(sistemas_bp)
     app.register_blueprint(links_bp)
     app.register_blueprint(comunicados_bp)
+    app.register_blueprint(arquivos_bp)
 
     @app.after_request
     def add_cors_headers(response):
