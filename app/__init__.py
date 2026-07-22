@@ -53,7 +53,7 @@ def create_app(config_class=Config):
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
-    cors.init_app(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+    cors.init_app(app, resources={r"^/(?!api/arquivos-do-curso).*$": {"origins": "*"}}, supports_credentials=True)
     Swagger(app, config=SWAGGER_CONFIG, merge=True)
 
     app.register_blueprint(auth_bp)
@@ -63,9 +63,10 @@ def create_app(config_class=Config):
 
     @app.after_request
     def add_cors_headers(response):
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        if not request.path.startswith('/api/arquivos-do-curso'):
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         return response
 
     @app.before_request
