@@ -7,6 +7,7 @@ from app.routes.auth_routes import auth_bp
 from app.routes.sistemas_routes import sistemas_bp
 from app.routes.links_routes import links_bp
 from app.routes.comunicados_routes import comunicados_bp
+from app.services.drive_service import validar_credencial_google
 
 
 SWAGGER_CONFIG = {
@@ -39,6 +40,15 @@ SWAGGER_CONFIG = {
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+
+    if not app.config.get('ARQUIVOS_ORIGIN_PERMITIDA'):
+        raise RuntimeError(
+            "ARQUIVOS_ORIGIN_PERMITIDA não definida. Obrigatória para o CORS do blueprint "
+            "'Arquivos do curso' — sem ela a feature não sobe com um fallback inseguro."
+        )
+    if not app.config.get('ARQUIVOS_PASTA_RAIZ'):
+        raise RuntimeError("ARQUIVOS_PASTA_RAIZ não definida.")
+    validar_credencial_google(app.config.get('GOOGLE_SERVICE_ACCOUNT_JSON'))
 
     db.init_app(app)
     migrate.init_app(app, db)

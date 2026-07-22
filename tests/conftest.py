@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from flask_jwt_extended import create_access_token
 
@@ -12,6 +14,14 @@ class TestConfig(Config):
     JWT_SECRET_KEY = 'test-jwt-secret'
     SECRET_KEY = 'test-secret'
     RATELIMIT_ENABLED = False
+    ARQUIVOS_ORIGIN_PERMITIDA = 'https://intranet-teste.local'
+    ARQUIVOS_PASTA_RAIZ = 'fake-root-id-teste'
+    GOOGLE_SERVICE_ACCOUNT_JSON = json.dumps({
+        'type': 'service_account',
+        'client_email': 'fake@example.iam.gserviceaccount.com',
+        'private_key': '-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----\n',
+        'token_uri': 'https://oauth2.googleapis.com/token',
+    })
 
 
 @pytest.fixture()

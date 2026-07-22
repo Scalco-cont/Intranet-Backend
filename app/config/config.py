@@ -13,3 +13,8 @@ class Config:
         hours=int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES_HOURS', 8))
     )
     DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
+
+    ARQUIVOS_PASTA_RAIZ = os.getenv('ARQUIVOS_PASTA_RAIZ')
+    ARQUIVOS_ORIGIN_PERMITIDA = os.getenv('ARQUIVOS_ORIGIN_PERMITIDA')
+    GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
+    ARQUIVOS_CACHE_TTL_SEGUNDOS = int(os.getenv('ARQUIVOS_CACHE_TTL_SEGUNDOS', 300))
