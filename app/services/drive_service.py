@@ -5,6 +5,38 @@ código de acesso antes disso.
 """
 import json
 
+from flask import current_app
+from itsdangerous import BadData, URLSafeSerializer
+
+SALT = 'arquivos-do-curso'
+MAX_PROFUNDIDADE = 20
+
+
+class ArquivosDoCursoError(Exception):
+    def __init__(self, codigo, mensagem, status):
+        super().__init__(mensagem)
+        self.codigo = codigo
+        self.mensagem = mensagem
+        self.status = status
+
+
+def _serializer():
+    return URLSafeSerializer(current_app.config['SECRET_KEY'], salt=SALT)
+
+
+def mintar_token(id_real, tipo, nome, caminho=None):
+    payload = {'id': id_real, 'tipo': tipo, 'nome': nome}
+    if tipo == 'pasta':
+        payload['caminho'] = caminho if caminho is not None else []
+    return _serializer().dumps(payload)
+
+
+def decodificar_token(token):
+    try:
+        return _serializer().loads(token)
+    except BadData as exc:
+        raise ArquivosDoCursoError('solicitacao_invalida', 'Token inválido.', 400) from exc
+
 
 def validar_credencial_google(raw_json):
     """Valida só o formato — não constrói client nem toca rede. Nunca loga o conteúdo."""
